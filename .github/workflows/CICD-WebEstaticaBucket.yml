@@ -1,0 +1,127 @@
+name: CI/CD a tope
+
+#evento para que se deployee cuando se hace el push
+#on:
+#  push:   #evento a hacer en este caso cuando hagamos un push
+#    branches:   #en la rama main
+#      - main
+
+#Este evento es para que solo se deployee si se lo digo manualmente
+on:
+ workflow_dispatch:
+
+jobs:
+#job para desplegar infraestructura de terraform
+  despliegue:   #nombre del job
+    runs-on: ubuntu-latest
+    
+    outputs:
+      bucket_nombre: ${{ steps.capturar_bucket.outputs.bucket_nombre }}
+      ip_fedora_php: ${{ steps.capturar_ip_fedora_php.outputs.ip_fedora_php }}
+      ip_fedora: ${{ steps.capturar_ip_fedora.outputs.ip_fedora }}
+      
+    steps:   #pasos
+          #este paso copia lo que hay en la rama main en la maquina virtual de ubuntu (lo de arriba)
+          
+      - name: Checkout   #nombre del action
+        uses: actions/checkout@v4  #en el apartado de la derecha buscar el nombre del anterior aprametro y ponerle el uso (copiar y pegar)
+      
+      - name: Configurar credenciales aws
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: "us-east-1"  # Cambia a la región de AWS que estás usando
+          
+      #este paso es para instalar terraform en la maquina virtual
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        id: init
+        run: terraform init  
+       
+      - name: Plan Terraform
+        id: plan
+        run: terraform plan -var 'public_key=${{ secrets.DEPLOYER_PUBLIC_KEY }}'
+  
+      - name: Terraform Apply
+        env:
+         #definido previamente otro secreto con la clave publica deployer-key.pub
+         TF_VAR_deployer_public_key: ${{ secrets.DEPLOYER_PUBLIC_KEY }}
+        run: terraform apply -auto-approve -var 'public_key=${{ secrets.DEPLOYER_PUBLIC_KEY }}'
+
+      #capturar los outputs de terraform y hacerlos como outputs del job para poder usarlos en otros jobs
+      - name: Capturar output de Terraform (Bucket)
+        id: capturar_bucket
+        run: echo "bucket_nombre=$(terraform output -raw s3)" >> "$GITHUB_OUTPUT"
+
+      - name: Capturar output de IP pública EC2 de Debian
+        id: capturar_ip_fedora_php
+        run: echo "ip_fedora_php=$(terraform output -raw instance_public_ip_fedora_php)" >> "$GITHUB_OUTPUT"
+
+      - name: Capturar output de IP pública EC2 de Fedora
+        id: capturar_ip_fedora
+        run: echo "ip_fedora=$(terraform output -raw instance_public_ip_fedora)" >> "$GITHUB_OUTPUT"
+
+      - name: Subir tfstate al bucket de S3
+        run: aws s3 cp terraform.tfstate s3://$(terraform output -raw s3) --region us-east-1
+        
+  #segundo job bucket como servidor y subir la pagina al bucket      
+  SubirPaginaEstatica: 
+    needs: despliegue
+    runs-on: ubuntu-latest
+    steps: 
+    
+      - name: Checking out code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: "us-east-1"
+
+      #He de deshabilitar el bloqueo de acceso publico sino no puedo habilitar el hosting
+      - name: Deshabilitar bloqueo de acceso público temporalmente
+        run: |
+         aws s3api put-public-access-block \
+         --bucket ${{ needs.despliegue.outputs.bucket_nombre }} \
+         --public-access-block-configuration '{
+          "BlockPublicAcls": false,
+          "IgnorePublicAcls": false,
+          "BlockPublicPolicy": false,
+          "RestrictPublicBuckets": false
+         }'
+
+      - name: Habilitar el hosting de página web estática
+        run: |
+          aws s3 website s3://${{ needs.despliegue.outputs.bucket_nombre }} --index-document index.html --error-document 404.html
+
+      - name: Configurar la política de acceso público
+        run: |
+          aws s3api put-bucket-policy --bucket ${{ needs.despliegue.outputs.bucket_nombre }} --policy '{
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": [
+                "s3:GetObject"
+                ],
+                "Resource": [
+                "arn:aws:s3:::${{ needs.despliegue.outputs.bucket_nombre }}/*"
+                ]
+              }
+            ]
+          }'
+
+      - name: Subir a S3 bucket el index
+        run: aws s3 cp ./html/index.html s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.html    
+
+      - name: Subir a S3 bucket la carpeta Pagina  
+        run: aws s3 sync ./html/index.css s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.css
