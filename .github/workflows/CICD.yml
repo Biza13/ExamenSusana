@@ -17,7 +17,7 @@ jobs:
     
     outputs:
       bucket_nombre: ${{ steps.capturar_bucket.outputs.bucket_nombre }}
-      ip_debian: ${{ steps.capturar_ip_debian.outputs.ip_debian }}
+      ip_fedora_php: ${{ steps.capturar_ip_fedora_php.outputs.ip_fedora_php }}
       ip_fedora: ${{ steps.capturar_ip_fedora.outputs.ip_fedora }}
       
     steps:   #pasos
@@ -58,8 +58,8 @@ jobs:
         run: echo "bucket_nombre=$(terraform output -raw s3)" >> "$GITHUB_OUTPUT"
 
       - name: Capturar output de IP pública EC2 de Debian
-        id: capturar_ip_debian
-        run: echo "ip_debian=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
+        id: capturar_ip_fedora_php
+        run: echo "ip_fedora_php=$(terraform output -raw instance_public_ip_fedora_php)" >> "$GITHUB_OUTPUT"
 
       - name: Capturar output de IP pública EC2 de Fedora
         id: capturar_ip_fedora
@@ -121,10 +121,10 @@ jobs:
           }'
 
       - name: Subir a S3 bucket el index
-        run: aws s3 cp ./index.html s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.html    
+        run: aws s3 cp ./html/index.html s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.html    
 
-      - name: Subir a S3 bucket la carpeta Pagina  
-        run: aws s3 sync ./Pagina s3://${{ needs.despliegue.outputs.bucket_nombre }}/Pagina
+      - name: Subir a S3 el css 
+        run: aws s3 sync ./html/index.css s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.css
         
   #job 3 generar y subir la carpeta de docs DOCUMENTACIÓN
   Documentacion:
@@ -143,6 +143,11 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: "us-east-1"
 
+      - name: Crear archivo private key
+        run: |
+          echo "${{ secrets.DEPLOY_KEY }}" > deploy_key.pem
+          chmod 600 deploy_key.pem    
+
       - name: Instalar Node.js y npm
         run: |
           sudo apt-get update
@@ -151,13 +156,43 @@ jobs:
       - name: Instalar jsdoc y generar documentacion
         run: |
           sudo npm install -g jsdoc
-          sudo jsdoc ./Pagina/funcion.js -d ./docs
+          sudo jsdoc ./ejercicio2/index.js -d ./docs
 
-      - name: Subir documentacion al S3
-        run: aws s3 sync ./docs s3://${{ needs.despliegue.outputs.bucket_nombre }}/Pagina/docs
+      #subir archivos a lainstancia
+      - name: Con Rsync subir los archivos a el servidor remoto
+        run: |
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./ejercicio2/index.html ec2-user@${{ needs.despliegue.outputs.ip_fedora }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./ejercicio2/index.css ec2-user@${{ needs.despliegue.outputs.ip_fedora }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./ejercicio2/index.js ec2-user@${{ needs.despliegue.outputs.ip_fedora }}:/home/admin/    
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./docs ec2-user@${{ needs.despliegue.outputs.ip_fedora }}:/home/admin/
+
+      - name: Mover archivos a /var/www/html en la instancia
+        run: |
+          ssh -i deploy_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.despliegue.outputs.ip_fedora }} << 'EOF'
+            sudo mv /home/admin/index.html /var/www/html/index.html
+            sudo chown www-data:www-data /var/www/html/index.html
+            sudo chmod 644 /var/www/html/index.html
+
+            sudo mv /home/admin/index.css /var/www/html/index.css
+            sudo chown -R www-data:www-data /var/www/html/index.css
+            sudo chmod -R 755 /var/www/html/index.css
+
+            sudo mv /home/admin/index.js /var/www/html/index.js
+            sudo chown -R www-data:www-data /var/www/html/index.js
+            sudo chmod -R 755 /var/www/html/index.js
+
+            sudo mv /home/admin/docs /var/www/html/docs
+            sudo chown www-data:www-data /var/www/html/docs
+            sudo chmod 644 /var/www/html/docs
+
+          EOF
 
       - name: Eliminar carpeta docs del repositorio
-        run: sudo rm -rf ./docs    
+        run: sudo rm -rf ./docs  
+
+      - name: Borrar archivo private key
+        run: |
+          rm -f deploy_key.pem  
 
       #HASTA AQUI FUNCIONA
 
@@ -201,13 +236,12 @@ jobs:
 
       - name: Con Rsync subir los archivos a el servidor remoto
         run: |
-          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./index.php admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
-          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./MiProyecto admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
-          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./default admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./index.php ec2-user@${{ needs.despliegue.outputs.ip_fedora_php }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./MiProyecto ec2-user@${{ needs.despliegue.outputs.ip_fedora_php }}:/home/admin/
 
       - name: Mover archivos a /var/www/html en la instancia
         run: |
-          ssh -i deploy_key.pem -o StrictHostKeyChecking=no admin@${{ needs.despliegue.outputs.ip_debian }} << 'EOF'
+          ssh -i deploy_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.despliegue.outputs.ip_fedora_php }} << 'EOF'
             sudo mv /home/admin/index.php /var/www/html/index.php
             sudo chown www-data:www-data /var/www/html/index.php
             sudo chmod 644 /var/www/html/index.php
@@ -217,11 +251,7 @@ jobs:
             sudo chmod -R 755 /var/www/html/MiProyecto
 
             sudo rm -f /var/www/html/index.html
-            sudo rm -f /var/www/html/index.nginx-debian.html
 
-            sudo mv /home/admin/default /etc/nginx/sites-available/default
-
-            sudo systemctl restart nginx
           EOF
 
       - name: Borrar archivo private key
