@@ -1,4 +1,4 @@
-name: CI/CD a tope
+name: CI/CD a tope ejercicio1
 
 #evento para que se deployee cuando se hace el push
 #on:
