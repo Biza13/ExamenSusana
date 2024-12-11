@@ -119,4 +119,4 @@ jobs:
         run: aws s3 cp ./html/index.html s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.html    
 
       - name: Subir a S3 bucket la carpeta Pagina  
-        run: aws s3 sync ./html/index.css s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.css
+        run: aws s3 cp ./html/index.css s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.css
