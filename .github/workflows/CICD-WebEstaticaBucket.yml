@@ -17,7 +17,6 @@ jobs:
     
     outputs:
       bucket_nombre: ${{ steps.capturar_bucket.outputs.bucket_nombre }}
-      ip_fedora_php: ${{ steps.capturar_ip_fedora_php.outputs.ip_fedora_php }}
       ip_fedora: ${{ steps.capturar_ip_fedora.outputs.ip_fedora }}
       
     steps:   #pasos
@@ -56,10 +55,6 @@ jobs:
       - name: Capturar output de Terraform (Bucket)
         id: capturar_bucket
         run: echo "bucket_nombre=$(terraform output -raw s3)" >> "$GITHUB_OUTPUT"
-
-      - name: Capturar output de IP pública EC2 de Debian
-        id: capturar_ip_fedora_php
-        run: echo "ip_fedora_php=$(terraform output -raw instance_public_ip_fedora_php)" >> "$GITHUB_OUTPUT"
 
       - name: Capturar output de IP pública EC2 de Fedora
         id: capturar_ip_fedora
