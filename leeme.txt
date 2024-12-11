@@ -1,0 +1,2 @@
+el primer ejercicio esta en el bucket y es el yml de CICDEj1
+el segundo ejercicio 
