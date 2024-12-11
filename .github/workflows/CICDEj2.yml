@@ -107,15 +107,15 @@ jobs:
         run: |
           ssh -i deploy_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.despliegue.outputs.ip_fedora }} << 'EOF'
             sudo mv /home/ec2-user/index.html /var/www/html/index.html
-            sudo chown www-data:www-data /var/www/html/index.html
+            sudo chown apache:apache /var/www/html/index.html
             sudo chmod 644 /var/www/html/index.html
 
             sudo mv /home/ec2-user/index.css /var/www/html/index.css
-            sudo chown -R www-data:www-data /var/www/html/index.css
+            sudo chown -R apache:apache /var/www/html/index.css
             sudo chmod -R 755 /var/www/html/index.css
 
             sudo mv /home/ec2-user/index.js /var/www/html/index.js
-            sudo chown -R www-data:www-data /var/www/html/index.js
+            sudo chown -R apache:apache /var/www/html/index.js
             sudo chmod -R 755 /var/www/html/index.js
 
             sudo mv /home/ec2-user/docs /var/www/html/docs
