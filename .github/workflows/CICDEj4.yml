@@ -110,11 +110,11 @@ jobs:
         run: |
           ssh -i deploy_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.despliegue.outputs.ip_fedora }} << 'EOF'
             sudo mv /home/ec2-user/index.php /var/www/html/index.php
-            sudo chown www-data:www-data /var/www/html/index.php
+            sudo chown apache:apache /var/www/html/index.php
             sudo chmod 644 /var/www/html/index.php
 
             sudo mv /home/ec2-user/MiProyecto /var/www/html/MiProyecto
-            sudo chown -R www-data:www-data /var/www/html/MiProyecto
+            sudo chown -R apache:apache /var/www/html/MiProyecto
             sudo chmod -R 755 /var/www/html/MiProyecto
 
             sudo rm -f /var/www/html/index.html
