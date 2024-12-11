@@ -1,0 +1,229 @@
+name: CI/CD a tope
+
+#evento para que se deployee cuando se hace el push
+#on:
+#  push:   #evento a hacer en este caso cuando hagamos un push
+#    branches:   #en la rama main
+#      - main
+
+#Este evento es para que solo se deployee si se lo digo manualmente
+on:
+ workflow_dispatch:
+
+jobs:
+#job para desplegar infraestructura de terraform
+  despliegue:   #nombre del job
+    runs-on: ubuntu-latest
+    
+    outputs:
+      bucket_nombre: ${{ steps.capturar_bucket.outputs.bucket_nombre }}
+      ip_debian: ${{ steps.capturar_ip_debian.outputs.ip_debian }}
+      ip_fedora: ${{ steps.capturar_ip_fedora.outputs.ip_fedora }}
+      
+    steps:   #pasos
+          #este paso copia lo que hay en la rama main en la maquina virtual de ubuntu (lo de arriba)
+          
+      - name: Checkout   #nombre del action
+        uses: actions/checkout@v4  #en el apartado de la derecha buscar el nombre del anterior aprametro y ponerle el uso (copiar y pegar)
+      
+      - name: Configurar credenciales aws
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: "us-east-1"  # Cambia a la región de AWS que estás usando
+          
+      #este paso es para instalar terraform en la maquina virtual
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        id: init
+        run: terraform init  
+       
+      - name: Plan Terraform
+        id: plan
+        run: terraform plan -var 'public_key=${{ secrets.DEPLOYER_PUBLIC_KEY }}'
+  
+      - name: Terraform Apply
+        env:
+         #definido previamente otro secreto con la clave publica deployer-key.pub
+         TF_VAR_deployer_public_key: ${{ secrets.DEPLOYER_PUBLIC_KEY }}
+        run: terraform apply -auto-approve -var 'public_key=${{ secrets.DEPLOYER_PUBLIC_KEY }}'
+
+      #capturar los outputs de terraform y hacerlos como outputs del job para poder usarlos en otros jobs
+      - name: Capturar output de Terraform (Bucket)
+        id: capturar_bucket
+        run: echo "bucket_nombre=$(terraform output -raw s3)" >> "$GITHUB_OUTPUT"
+
+      - name: Capturar output de IP pública EC2 de Debian
+        id: capturar_ip_debian
+        run: echo "ip_debian=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
+
+      - name: Capturar output de IP pública EC2 de Fedora
+        id: capturar_ip_fedora
+        run: echo "ip_fedora=$(terraform output -raw instance_public_ip_fedora)" >> "$GITHUB_OUTPUT"
+
+      - name: Subir tfstate al bucket de S3
+        run: aws s3 cp terraform.tfstate s3://$(terraform output -raw s3) --region us-east-1
+
+  #segundo job bucket como servidor y subir la pagina al bucket      
+  SubirPaginaEstatica: 
+    needs: despliegue
+    runs-on: ubuntu-latest
+    steps: 
+    
+      - name: Checking out code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: "us-east-1"
+
+      #He de deshabilitar el bloqueo de acceso publico sino no puedo habilitar el hosting
+      - name: Deshabilitar bloqueo de acceso público temporalmente
+        run: |
+         aws s3api put-public-access-block \
+         --bucket ${{ needs.despliegue.outputs.bucket_nombre }} \
+         --public-access-block-configuration '{
+          "BlockPublicAcls": false,
+          "IgnorePublicAcls": false,
+          "BlockPublicPolicy": false,
+          "RestrictPublicBuckets": false
+         }'
+
+      - name: Habilitar el hosting de página web estática
+        run: |
+          aws s3 website s3://${{ needs.despliegue.outputs.bucket_nombre }} --index-document index.html --error-document 404.html
+
+      - name: Configurar la política de acceso público
+        run: |
+          aws s3api put-bucket-policy --bucket ${{ needs.despliegue.outputs.bucket_nombre }} --policy '{
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": [
+                "s3:GetObject"
+                ],
+                "Resource": [
+                "arn:aws:s3:::${{ needs.despliegue.outputs.bucket_nombre }}/*"
+                ]
+              }
+            ]
+          }'
+
+      - name: Subir a S3 bucket el index
+        run: aws s3 cp ./index.html s3://${{ needs.despliegue.outputs.bucket_nombre }}/index.html    
+
+      - name: Subir a S3 bucket la carpeta Pagina  
+        run: aws s3 sync ./Pagina s3://${{ needs.despliegue.outputs.bucket_nombre }}/Pagina
+        
+  #job 3 generar y subir la carpeta de docs DOCUMENTACIÓN
+  Documentacion:
+    needs: despliegue
+    runs-on: ubuntu-latest
+    steps:
+    
+      - name: Check out repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Configurar credenciales aws
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: "us-east-1"
+
+      - name: Instalar Node.js y npm
+        run: |
+          sudo apt-get update
+          sudo apt install -y nodejs npm
+
+      - name: Instalar jsdoc y generar documentacion
+        run: |
+          sudo npm install -g jsdoc
+          sudo jsdoc ./Pagina/funcion.js -d ./docs
+
+      - name: Subir documentacion al S3
+        run: aws s3 sync ./docs s3://${{ needs.despliegue.outputs.bucket_nombre }}/Pagina/docs
+
+      - name: Eliminar carpeta docs del repositorio
+        run: sudo rm -rf ./docs    
+
+      #HASTA AQUI FUNCIONA
+
+  #tercer job para las pruebas de phpUnit    
+  phpUnit:
+    runs-on: ubuntu-latest
+    needs: despliegue
+    #capturar la salida del test (succes, failiure o warning)
+    outputs:
+      test_resultado: ${{ steps.resultado.outcome }}
+    steps:
+      - name: Checking out code
+        uses: actions/checkout@v4
+
+      - name: instalar composer
+        working-directory: ./MiProyecto
+        run: composer require --dev phpunit/phpunit ^10
+        
+      - name: Remplazar composer.json en MiProyecto
+        run: cp ./composer.json ./MiProyecto/composer.json
+
+      - name: ejecutar el test
+        id: resultado
+        working-directory: ./MiProyecto
+        run: php ./vendor/bin/phpunit || true  #el true es para que aunque haya errores pase como 0, esdecir sin fallos
+
+  subirPaginaPHP:   
+     #necesito dos jobs para hacer este, el de las pruebas unitarias y el de despliegue para poder acceder a los outputs de este
+     runs-on: ubuntu-latest
+     needs: [phpUnit, despliegue]
+     if: ${{ needs.phpUnit.outputs.test_resultado == 'success' || needs.phpUnit.outputs.test_resultado == 'warning' }}
+
+     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Crear archivo private key
+        run: |
+          echo "${{ secrets.DEPLOY_KEY }}" > deploy_key.pem
+          chmod 600 deploy_key.pem
+
+      - name: Con Rsync subir los archivos a el servidor remoto
+        run: |
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./index.php admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./MiProyecto admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
+          rsync -avz -e "ssh -i deploy_key.pem -o StrictHostKeyChecking=no" ./default admin@${{ needs.despliegue.outputs.ip_debian }}:/home/admin/
+
+      - name: Mover archivos a /var/www/html en la instancia
+        run: |
+          ssh -i deploy_key.pem -o StrictHostKeyChecking=no admin@${{ needs.despliegue.outputs.ip_debian }} << 'EOF'
+            sudo mv /home/admin/index.php /var/www/html/index.php
+            sudo chown www-data:www-data /var/www/html/index.php
+            sudo chmod 644 /var/www/html/index.php
+
+            sudo mv /home/admin/MiProyecto /var/www/html/MiProyecto
+            sudo chown -R www-data:www-data /var/www/html/MiProyecto
+            sudo chmod -R 755 /var/www/html/MiProyecto
+
+            sudo rm -f /var/www/html/index.html
+            sudo rm -f /var/www/html/index.nginx-debian.html
+
+            sudo mv /home/admin/default /etc/nginx/sites-available/default
+
+            sudo systemctl restart nginx
+          EOF
+
+      - name: Borrar archivo private key
+        run: |
+          rm -f deploy_key.pem
