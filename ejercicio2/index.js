@@ -1,6 +1,9 @@
 // Agregar animación de entrada al desplazarse
 const productList = document.querySelectorAll('.product');
 
+/**
+ * Dar animaciones a las entradas de los productos
+ */
 const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
         if (entry.isIntersecting) {
@@ -8,6 +11,4 @@ const observer = new IntersectionObserver((entries) => {
             entry.target.classList.add('visible');
         }
     });
-}, {
-   
-
+});

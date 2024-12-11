@@ -20,16 +20,21 @@ output "subred_privada_id" {
 } */
 
 #ip publica de instancia con ubuntu
-output "instance_public_ip" {
+/* output "instance_public_ip" {
   description = "IP publica de instancia EC2"
   value = aws_instance.instancia.public_ip
-}
+} */
 
 #ip publica de instancia con amazon linux
 
 output "instance_public_ip_fedora" {
   description = "IP pública de la instancia EC2 Fedora"
   value       = aws_instance.instancia_fedora.public_ip
+}
+
+output "instance_public_ip_fedora_php" {
+  description = "IP pública de la instancia EC2 Fedora para php"
+  value       = aws_instance.instancia_fedora_php.public_ip
 }
 
 output "s3" {
