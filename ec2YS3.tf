@@ -118,7 +118,7 @@ resource "aws_security_group" "security" {
 #} 
 
 #crear una instancia
-resource "aws_instance" "instancia" {
+/* resource "aws_instance" "instancia" {
   ami           = data.aws_ami.debian.id
   instance_type = "t2.micro"    #poner el t2
   subnet_id = aws_subnet.subred-publica.id
@@ -131,7 +131,7 @@ resource "aws_instance" "instancia" {
   }
 
   user_data = file("script-nginxEn-debian.sh")
-}
+} */
 
 #otra instancia con amazon linux
 resource "aws_instance" "instancia_fedora" {
