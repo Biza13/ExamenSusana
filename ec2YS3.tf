@@ -148,20 +148,6 @@ resource "aws_instance" "instancia_fedora" {
   user_data = file("script.sh")
 }
 
-resource "aws_instance" "instancia_fedora_php" {
-  ami           = data.aws_ami.amazon_linux.id
-  instance_type = "t2.micro"    #poner el t2
-  subnet_id = aws_subnet.subred-publica.id
-  vpc_security_group_ids = [aws_security_group.security.id]
-  #key_name      = aws_key_pair.deployer.key_name  # Usar la clave "deployer-key"
-  key_name = "deployer-key"  # coje el par de claves que ya estan en aws por el nombre
-
-  tags = {
-    Name = "instancia-nginx"
-  }
-  user_data = file("script.sh")
-}
-
 #creacion del bucket s3 para guardar archivos
 resource "aws_s3_bucket" "s3"{    
   bucket = var.s3  #nombre que le pondremos al bucket
@@ -171,10 +157,3 @@ resource "aws_s3_bucket" "s3"{
     Enviroment = "Dev"
   }
 }
-
-/* resource "aws_s3_bucket_versioning" "versioning_s3" {
-  bucket = aws_s3_bucket.s3.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-} */

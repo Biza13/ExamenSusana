@@ -32,11 +32,6 @@ output "instance_public_ip_fedora" {
   value       = aws_instance.instancia_fedora.public_ip
 }
 
-output "instance_public_ip_fedora_php" {
-  description = "IP pública de la instancia EC2 Fedora para php"
-  value       = aws_instance.instancia_fedora_php.public_ip
-}
-
 output "s3" {
   value = aws_s3_bucket.s3.id
 }
